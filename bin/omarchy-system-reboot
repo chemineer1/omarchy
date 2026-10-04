@@ -5,9 +5,11 @@
 # omarchy:aliases=omarchy reboot
 
 if [[ ${1:-} == "--inhibited" ]]; then
+  # Optional feedback must not delay state clearing or window-close requests.
+  omarchy-osd -i reboot -m "Rebooting" -d 5000 &
+
   # Close windows in the background so they cannot delay reboot.
   (
-    omarchy-osd -i reboot -m "Rebooting" -d 5000
     omarchy-state clear re*-required
     omarchy-hyprland-window-close-all
   ) &

@@ -39,6 +39,20 @@ for command in omarchy-state omarchy-hyprland-window-close-all omarchy-osd omarc
 command=${0##*/}
 printf '%s %s\n' "$command" "$*" >>"$CALL_LOG"
 case $command in
+  omarchy-osd)
+    if [[ ${BLOCK_OSD:-false} == "true" ]]; then
+      touch "$CALL_LOG.osd-blocked"
+      for (( attempt = 0; attempt < 200; attempt++ )); do
+        if [[ -f $CALL_LOG.power-request ]]; then
+          touch "$CALL_LOG.osd-finished"
+          exit 0
+        fi
+        /usr/bin/sleep 0.01
+      done
+      touch "$CALL_LOG.osd-timeout"
+      exit 1
+    fi
+    ;;
   omarchy-hyprland-window-close-all)
     if [[ ${BLOCK_WINDOW_CLOSE:-false} == "true" ]]; then
       for (( attempt = 0; attempt < 200; attempt++ )); do
@@ -59,7 +73,11 @@ case $command in
     if [[ $1 == "2" ]]; then
       # Synchronize with background preparation without a fixed test-time sleep.
       for (( attempt = 0; attempt < 200; attempt++ )); do
-        grep -q '^omarchy-hyprland-window-close-all ' "$CALL_LOG" && break
+        if grep -q '^omarchy-hyprland-window-close-all ' "$CALL_LOG" &&
+          grep -q '^omarchy-osd ' "$CALL_LOG" &&
+          { [[ ${BLOCK_OSD:-false} != "true" ]] || [[ -f $CALL_LOG.osd-blocked ]]; }; then
+          break
+        fi
         /usr/bin/sleep 0.01
       done
       touch "$CALL_LOG.grace"
@@ -67,6 +85,11 @@ case $command in
     ;;
   systemctl)
     [[ $* == "$POWER_COMMAND --no-wall" && -f $CALL_LOG.inhibited && -f $CALL_LOG.grace ]] || exit 2
+    if [[ ${BLOCK_OSD:-false} == "true" ]]; then
+      grep -q '^omarchy-state clear re\*-required$' "$CALL_LOG" || exit 3
+      grep -q '^omarchy-hyprland-window-close-all ' "$CALL_LOG" || exit 3
+      [[ -f $CALL_LOG.osd-blocked && ! -f $CALL_LOG.osd-finished && ! -f $CALL_LOG.osd-timeout ]] || exit 3
+    fi
     touch "$CALL_LOG.power-request"
     [[ ${FAIL_POWER_REQUEST:-false} != "true" ]]
     ;;
@@ -163,3 +186,14 @@ for action in shutdown reboot; do
   [[ $? == 17 ]] || fail "notification failure preserves the $action error"
   pass "notification failure preserves the $action error"
 done
+
+export POWER_COMMAND=reboot
+run_power_command reboot || fail "reboot service is scheduled with a stalled OSD"
+BLOCK_OSD=true bash "$CALL_LOG.worker" || fail "reboot prepares applications while its OSD is stalled"
+for (( attempt = 0; attempt < 200; attempt++ )); do
+  [[ -f $CALL_LOG.osd-finished || -f $CALL_LOG.osd-timeout ]] && break
+  /usr/bin/sleep 0.01
+done
+[[ -f $CALL_LOG.osd-finished && ! -f $CALL_LOG.osd-timeout ]] || fail "reboot completes before the stalled OSD times out"
+! grep -q '^omarchy-notification-send ' "$CALL_LOG" || fail "a stalled OSD does not report reboot failure"
+pass "reboot clears state and requests window closing before reboot even while its OSD is stalled"
