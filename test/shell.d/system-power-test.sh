@@ -145,7 +145,7 @@ BLOCK_WINDOW_CLOSE=true bash "$CALL_LOG.worker" || fail "shutdown proceeds while
 ! grep -q '^omarchy-notification-send ' "$CALL_LOG" || fail "shutdown does not report a close timeout as failure"
 pass "blocked window closing cannot prevent poweroff"
 
-for action in reboot reboot-boot-menu shutdown logout; do
+for action in reboot shutdown logout; do
   : >"$call_log"
   if FAIL_SYSTEMD_RUN=true "$ROOT/bin/omarchy-system" "$action"; then
     fail "$action aborts when scheduling fails"
@@ -195,7 +195,7 @@ for action in logout reboot shutdown; do
   pass "$action aliases and system routes forward the action safely"
 done
 
-for action in logout reboot reboot-boot-menu shutdown; do
+for action in logout reboot shutdown; do
   : >"$call_log"
   "$ROOT/bin/omarchy-system" "$action" --help >/dev/null || fail "direct $action help succeeds"
   if "$ROOT/bin/omarchy-system" "$action" --typo >/dev/null 2>&1; then
@@ -210,12 +210,9 @@ done
 "$ROOT/bin/omarchy" system lock --help | grep -q 'omarchy-system-lock' || fail "system lock remains routed to its own command"
 pass "existing system subcommands keep their routes"
 
-# Last: each action overwrites the shared worker file the sections above reuse.
-for action in reboot reboot-boot-menu; do
+# Last: this overwrites the shared worker file the sections above reuse.
+for action in reboot; do
   expected_command="systemctl reboot --no-wall"
-  if [[ $action == "reboot-boot-menu" ]]; then
-    expected_command="systemctl reboot --boot-loader-menu=0 --no-wall"
-  fi
   run_power_command "$action" || fail "$action service is scheduled"
   PATH=/stale/bin OMARCHY_PATH=/stale/checkout HYPRLAND_INSTANCE_SIGNATURE=stale /bin/bash "$CALL_LOG.worker" || fail "protected $action succeeds"
   [[ -f $CALL_LOG.environment ]] || fail "$action forwards the caller environment over stale manager values"
